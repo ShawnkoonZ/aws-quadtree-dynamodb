@@ -18,7 +18,7 @@ public class ObjectBuilder {
              "\"yMin\":{\"N\":\"" + yMin + "\"}," +
              "\"xMax\":{\"N\":\"" + xMax + "\"}," + 
              "\"yMax\":{\"N\":\"" + yMax + "\"}}}," +
-             "\"data\":{\"M\":\"" + data + "\"}}";
+             "\"data\":{\"M\":{}}}";
     }
     else{
       json = "{}";
