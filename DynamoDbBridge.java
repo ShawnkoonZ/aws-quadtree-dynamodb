@@ -1,5 +1,7 @@
 import java.util.List;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -67,15 +69,21 @@ public class DynamoDbBridge {
   
   public void crossBridge(String bucketName, String key) throws Exception{
     ArrayList<String> s3Objects = this.getS3Objects(bucketName, key);
-    System.out.println(s3Objects);
+    System.out.println("DEBUG: " + s3Objects);
     
     while(!s3Objects.isEmpty()){
       String s3Object = s3Objects.remove(0);
-      String dynamoDbObject = this.buildDynamoDbObject(s3Object);
-      String id = this.getId(dynamoDbObject);
+      Map<String, AttributeValue> dynamoDbObject = this.buildDynamoDbObject(s3Object);
+      AttributeValue id = dynamoDbObject.get("id");
          
-      if(!id.equals("-1")){
-        this.pushToDynamoDb("1", dynamoDbObject); //TODO CHANGE THE FIRST PARAM TO THE ID VALUE - IT IS "1" FOR DEBUGGING PURPOSES
+      if(!id.toString().equals("-1")){
+        String identifier = id.toString().replace("S:", "");
+        identifier = identifier.replace(",", "");
+        identifier = identifier.replace("{", "");
+        identifier = identifier.replace("}", "");
+        identifier = identifier.replace(" ", "");
+        
+        this.pushToDynamoDb(identifier, dynamoDbObject); //TODO CHANGE THE FIRST PARAM TO THE ID VALUE - IT IS "1" FOR DEBUGGING PURPOSES
       }
     }
   }  
@@ -96,21 +104,34 @@ public class DynamoDbBridge {
     return s3Objects;
   }  
   
-  public String buildDynamoDbObject(String s3Object){
-    String dynamoDbObject = this.objBuilder.buildJsonObject(s3Object, ",");
+  public Map<String, AttributeValue> buildDynamoDbObject(String s3Object){
+    Map<String, AttributeValue> item = new HashMap<String, AttributeValue>();
+    String[] s3ObjectProperties = s3Object.split(",");
     
-    return dynamoDbObject;
+    Map<String, AttributeValue> coordinate = new HashMap<String, AttributeValue>();
+    coordinate.put("xMin", new AttributeValue().withS(s3ObjectProperties[1]));
+    coordinate.put("yMin", new AttributeValue().withS(s3ObjectProperties[2]));
+    coordinate.put("xMax", new AttributeValue().withS(s3ObjectProperties[3]));
+    coordinate.put("yMax", new AttributeValue().withS(s3ObjectProperties[4]));
+    
+    Map<String, AttributeValue> data = new HashMap<String, AttributeValue>();
+    
+    item.put("id", new AttributeValue().withS(s3ObjectProperties[0]));
+    item.put("coordinate", new AttributeValue().withM(coordinate));
+    item.put("data", new AttributeValue().withM(data));
+    
+    return item;
   }
   
-  public void pushToDynamoDb(String id, String JSON){     
-    Item item = new Item()
-      .withPrimaryKey("Id", id)
-      .withJSON("Node", JSON);
-      
-    System.out.println("Putting in the item with ID: " + id + " and JSON " + JSON);
-      
-    PutItemOutcome outcome = this.dynamoDbTable.putItem(item); 
-    System.out.println("DEBUG: Outcome -- " + outcome);
+  public void pushToDynamoDb(String id, Map<String, AttributeValue> dynamoDbObject) throws Exception{     
+    try{
+      PutItemRequest putItemRequest = new PutItemRequest(this.dynamoDbTableName, dynamoDbObject);
+      this.dynamoDbClient.putItem(putItemRequest);
+      System.out.println("DEBUG: Pushed the id " + id);
+    }
+    catch(Exception e){
+      System.out.println(e);
+    }
   }
   
   private void initAws(boolean initCross) throws Exception{
@@ -147,8 +168,8 @@ public class DynamoDbBridge {
     if(this.S3BucketExists){
       try{ //https://github.com/aws/aws-sdk-java/blob/master/src/samples/AmazonDynamoDB/AmazonDynamoDBSample.java
         CreateTableRequest createTableRequest = new CreateTableRequest().withTableName(this.dynamoDbTableName)
-          .withKeySchema(new KeySchemaElement().withAttributeName("name").withKeyType(KeyType.HASH))
-          .withAttributeDefinitions(new AttributeDefinition().withAttributeName("name").withAttributeType(ScalarAttributeType.S))
+          .withKeySchema(new KeySchemaElement().withAttributeName("id").withKeyType(KeyType.HASH))
+          .withAttributeDefinitions(new AttributeDefinition().withAttributeName("id").withAttributeType(ScalarAttributeType.S))
           .withProvisionedThroughput(new ProvisionedThroughput().withReadCapacityUnits(1L).withWriteCapacityUnits(1L));
         
         TableUtils.createTableIfNotExists(this.dynamoDbClient, createTableRequest);
